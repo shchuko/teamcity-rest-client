@@ -1,5 +1,7 @@
 package org.jetbrains.teamcity.rest
 
+import org.jetbrains.teamcity.rest.coroutines.TeamCityCoroutinesInstance
+
 
 /**
  * Factory object to create new object of [TeamCityInstance] interface
@@ -17,6 +19,10 @@ object TeamCityInstanceFactory {
   fun guestAuth(serverUrl: String): TeamCityInstance
           = createGuestAuthInstance(serverUrl)
 
+  @JvmStatic
+  fun guestAuthCoroutines(serverUrl: String): TeamCityCoroutinesInstance
+          = createGuestAuthCoroutinesInstance(serverUrl)
+
   /**
    * Creates username/password authenticated accessor
    *
@@ -26,9 +32,14 @@ object TeamCityInstanceFactory {
    *
    * Used via reflection for backward compatibility for deprecated methods
    */
+
   @JvmStatic
   fun httpAuth(serverUrl: String, username: String, password: String): TeamCityInstance
           = createHttpAuthInstance(serverUrl, username, password)
+
+  @JvmStatic
+  fun httpAuthCoroutines(serverUrl: String, username: String, password: String): TeamCityCoroutinesInstance
+          = createHttpAuthCoroutinesInstance(serverUrl, username, password)
 
   /**
    * Creates token based connection.
@@ -42,4 +53,8 @@ object TeamCityInstanceFactory {
   @JvmStatic
   fun tokenAuth(serverUrl: String, token: String): TeamCityInstance
           = createTokenAuthInstance(serverUrl, token)
+
+  @JvmStatic
+  fun tokenAuthCoroutines(serverUrl: String, token: String): TeamCityCoroutinesInstance
+          = createTokenAuthCoroutinesInstance(serverUrl, token)
 }
