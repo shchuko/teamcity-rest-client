@@ -1,15 +1,15 @@
 @file:Suppress("RemoveRedundantBackticks")
 
-package org.jetbrains.teamcity.rest
+package org.jetbrains.teamcity.rest.coroutines
 
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.runBlocking
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
+import org.jetbrains.teamcity.rest.BuildStatus
+import org.jetbrains.teamcity.rest.InvestigationState
+import org.jetbrains.teamcity.rest.TeamCityConversationException
+import org.jetbrains.teamcity.rest.TeamCityRestException
 import retrofit2.Response
 import retrofit2.http.*
-import kotlin.collections.ArrayList
 
 internal interface TeamCityService {
     // Even with `@Path(encoded = true)` retrofit2 will encode special characters like [?,=,&]

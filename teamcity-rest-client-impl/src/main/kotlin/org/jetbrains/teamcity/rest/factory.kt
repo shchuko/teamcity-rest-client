@@ -1,6 +1,9 @@
 package org.jetbrains.teamcity.rest
 
 import org.jetbrains.teamcity.rest.coroutines.TeamCityCoroutinesInstance
+import org.jetbrains.teamcity.rest.coroutines.createGuestAuthCoroutinesInstance
+import org.jetbrains.teamcity.rest.coroutines.createHttpAuthCoroutinesInstance
+import org.jetbrains.teamcity.rest.coroutines.createTokenAuthCoroutinesInstance
 
 
 /**
