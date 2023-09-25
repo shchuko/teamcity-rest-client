@@ -18,25 +18,25 @@ internal interface TeamCityCoroutinesInstanceEx : TeamCityCoroutinesInstance {
     fun toBuilder(): TeamCityInstanceBuilder
 }
 
-internal interface BuildEx : Build {
-    fun getTestRunsSeq(status: TestStatus? = null): Sequence<TestRun>
+internal interface BuildRefEx : BuildRef {
+    fun getTestRunsSeq(status: TestStatus? = null): Sequence<TestRunRef>
     fun getBuildProblemsSeq(): Sequence<BuildProblemOccurrence>
 }
 
 internal interface VcsRootLocatorEx : VcsRootLocator {
-    fun allSeq(): Sequence<VcsRoot>
+    fun allSeq(): Sequence<VcsRootRef>
 }
 
 internal interface BuildAgentLocatorEx : BuildAgentLocator {
-    fun allSeq(): Sequence<BuildAgent>
+    fun allSeq(): Sequence<BuildAgentRef>
 }
 
 internal interface BuildAgentPoolLocatorEx : BuildAgentPoolLocator {
-    fun allSeq(): Sequence<BuildAgentPool>
+    fun allSeq(): Sequence<BuildAgentPoolRef>
 }
 
 internal interface BuildLocatorEx : BuildLocator {
-    fun allSeq(): Sequence<Build>
+    fun allSeq(): Sequence<BuildRef>
 }
 
 internal interface InvestigationLocatorEx : InvestigationLocator {
@@ -49,18 +49,18 @@ internal interface MuteLocatorEx : MuteLocator {
 }
 
 internal interface TestLocatorEx : TestLocator {
-    fun allSeq(): Sequence<Test>
+    fun allSeq(): Sequence<TestRef>
 }
 
 internal interface TestRunsLocatorEx : TestRunsLocator {
-    fun allSeq(): Sequence<TestRun>
+    fun allSeq(): Sequence<TestRunRef>
 }
 
 internal interface UserLocatorEx : UserLocator {
-    fun allSeq(): Sequence<User>
+    fun allSeq(): Sequence<UserRef>
 }
 
 internal interface BuildQueueEx : BuildQueue {
-    fun queuedBuildsSeq(projectId: ProjectId? = null): Sequence<Build>
-    fun queuedBuildsSeq(buildConfigurationId: BuildConfigurationId): Sequence<Build>
+    fun queuedBuildsSeq(projectId: ProjectId? = null): Sequence<BuildRef>
+    fun queuedBuildsSeq(buildConfigurationId: BuildConfigurationId): Sequence<BuildRef>
 }

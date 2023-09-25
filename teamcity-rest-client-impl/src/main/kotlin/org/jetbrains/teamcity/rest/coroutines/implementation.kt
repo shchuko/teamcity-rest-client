@@ -225,44 +225,36 @@ internal class TeamCityCoroutinesInstanceImpl(
     override fun mutes(): MuteLocator = MuteLocatorImpl(this)
 
     override fun tests(): TestLocator = TestLocatorImpl(this)
-    override suspend fun build(id: BuildId): Build = BuildImpl(
-        BuildBean().also { it.id = id.stringId }, false, this
-    )
+    override suspend fun build(id: BuildId): BuildRef = BuildRefImpl(id, this)
 
-    override suspend fun build(buildConfigurationId: BuildConfigurationId, number: String): Build? =
+    override suspend fun build(buildConfigurationId: BuildConfigurationId, number: String): BuildRef? =
         BuildLocatorImpl(this).fromConfiguration(buildConfigurationId).withNumber(number).latest()
 
-    override suspend fun buildConfiguration(id: BuildConfigurationId): BuildConfiguration =
-        BuildConfigurationImpl(BuildTypeBean().also { it.id = id.stringId }, false, this)
+    override suspend fun buildConfiguration(id: BuildConfigurationId): BuildConfigurationRef =
+        BuildConfigurationRefImpl(id, this)
 
     override fun vcsRoots(): VcsRootLocator = VcsRootLocatorImpl(this)
 
-    override suspend fun vcsRoot(id: VcsRootId): VcsRoot = VcsRootImpl(service.vcsRoot(id.stringId), true, this)
+    override suspend fun vcsRoot(id: VcsRootId): VcsRootRef = VcsRootImpl(service.vcsRoot(id.stringId), true, this)
 
-    override suspend fun project(id: ProjectId): Project =
-        ProjectImpl(ProjectBean().let { it.id = id.stringId; it }, false, this)
+    override suspend fun project(id: ProjectId): ProjectRef = ProjectRefImpl(id,this)
 
-    override suspend fun rootProject(): Project = project(ProjectId("_Root"))
+    override suspend fun rootProject(): ProjectRef = project(ProjectId("_Root"))
 
-    override suspend fun user(id: UserId): User =
-        UserImpl(UserBean().also { it.id = id.stringId }, false, this)
+    override suspend fun user(id: UserId): UserRef = UserRefImpl(id, this)
 
-    override suspend fun user(userName: String): User {
+    override suspend fun user(userName: String): UserRef {
         val bean = service.users("username:$userName")
-        return UserImpl(bean, true, this)
+        return UserImpl(bean, this)
     }
 
     override fun users(): UserLocator = UserLocatorImpl(this)
 
-    override suspend fun change(buildConfigurationId: BuildConfigurationId, vcsRevision: String): Change =
-        ChangeImpl(
-            service.change(
-                buildType = buildConfigurationId.stringId, version = vcsRevision
-            ), true, this
-        )
+    override suspend fun change(buildConfigurationId: BuildConfigurationId, vcsRevision: String): ChangeRef =
+        ChangeImpl(service.change(buildType = buildConfigurationId.stringId, version = vcsRevision), this)
 
     override suspend fun change(id: ChangeId): Change =
-        ChangeImpl(ChangeBean().also { it.id = id.stringId }, false, this)
+        ChangeImpl(ChangeBean().also { it.id = id.stringId }, this)
 
     override fun buildQueue(): BuildQueue = BuildQueueImpl(this)
 
@@ -327,11 +319,11 @@ private class BuildAgentPoolLocatorImpl(private val instance: TeamCityCoroutines
 }
 
 private class UserLocatorImpl(private val instance: TeamCityCoroutinesInstanceImpl) : UserLocatorEx {
-    private suspend fun allUsers(): List<User> = instance.service.users().user.map { UserImpl(it, false, instance) }
+    private suspend fun allUsers(): List<UserRef> = instance.service.users().user.map { UserRefImpl(it, instance) }
 
-    override fun all(): Flow<User> = flow { allUsers().forEach { emit(it) } }
+    override fun all(): Flow<UserRef> = flow { allUsers().forEach { emit(it) } }
 
-    override fun allSeq(): Sequence<User> = runBlocking { allUsers() }.asSequence()
+    override fun allSeq(): Sequence<UserRef> = runBlocking { allUsers() }.asSequence()
 }
 
 private class BuildLocatorImpl(private val instance: TeamCityCoroutinesInstanceImpl) : BuildLocatorEx {
@@ -462,7 +454,7 @@ private class BuildLocatorImpl(private val instance: TeamCityCoroutinesInstanceI
         return this
     }
 
-    override suspend fun latest(): Build? {
+    override suspend fun latest(): BuildRef? {
         return limitResults(1).all().firstOrNull()
     }
 
@@ -505,22 +497,22 @@ private class BuildLocatorImpl(private val instance: TeamCityCoroutinesInstanceI
         return locator
     }
 
-    override fun all(): Flow<Build> {
+    override fun all(): Flow<BuildRef> {
         val buildLocator = getLocator()
         val flow = lazyPagingFlow(instance,
             getFirstBean = { instance.service.builds(buildLocator = buildLocator) },
             convertToPage = { buildsBean ->
-                Page(data = buildsBean.build.map { BuildImpl(it, false, instance) }, nextHref = buildsBean.nextHref)
+                Page(data = buildsBean.build.map { BuildRefImpl(it, instance) }, nextHref = buildsBean.nextHref)
             })
         return limitResults?.let(flow::take) ?: flow
     }
 
-    override fun allSeq(): Sequence<Build> {
+    override fun allSeq(): Sequence<BuildRef> {
         val buildLocator = getLocator()
         val sequence = lazyPagingSequence(instance,
             getFirstBean = { instance.service.builds(buildLocator = buildLocator) },
             convertToPage = { buildsBean ->
-                Page(data = buildsBean.build.map { BuildImpl(it, false, instance) }, nextHref = buildsBean.nextHref)
+                Page(data = buildsBean.build.map { BuildRefImpl(it, instance) }, nextHref = buildsBean.nextHref)
             })
         return limitResults?.let(sequence::take) ?: sequence
     }
@@ -764,7 +756,7 @@ private class TestRunsLocatorImpl(private val instance: TeamCityCoroutinesInstan
         return Locator(testOccurrencesLocator, fields, isFullBean)
     }
 
-    override fun all(): Flow<TestRun> {
+    override fun all(): Flow<TestRunRef> {
         val (testOccurrencesLocator, fields, isFullBean) = getLocator()
         val flow = lazyPagingFlow(instance,
             getFirstBean = { instance.service.testOccurrences(testOccurrencesLocator, fields) },
@@ -840,48 +832,41 @@ private abstract class InvestigationMuteBaseImpl<TBean : InvestigationMuteBaseBe
     instance: TeamCityCoroutinesInstanceImpl
 ) :
     BaseImpl<TBean>(bean, isFullProjectBean, instance) {
-    val id: InvestigationId
-        get() = InvestigationId(idString)
+    val id: InvestigationId = InvestigationId(idString)
 
-    val reporter: User?
-        get() {
-            val assignment = bean.assignment ?: return null
-            val userBean = assignment.user ?: return null
-            return UserImpl(userBean, false, instance)
+    val reporter: UserRef? by lazy {
+        bean.assignment?.user?.let { userBean -> UserRefImpl(userBean, instance) }
+    }
+
+    val comment: String = bean.assignment?.text ?: ""
+    val resolveMethod: InvestigationResolveMethod by lazy {
+        when (bean.resolution?.type) {
+            "whenFixed" -> InvestigationResolveMethod.WHEN_FIXED
+            "manually" -> InvestigationResolveMethod.MANUALLY
+            else -> error("Properties are invalid")
         }
-    val comment: String
-        get() = bean.assignment?.text ?: ""
-    val resolveMethod: InvestigationResolveMethod
-        get() {
-            val asString = bean.resolution?.type
-            if (asString == "whenFixed") {
-                return InvestigationResolveMethod.WHEN_FIXED
-            } else if (asString == "manually") {
-                return InvestigationResolveMethod.MANUALLY
-            }
+    }
 
-            throw IllegalStateException("Properties are invalid")
+    val targetType: InvestigationTargetType by lazy {
+        val target = checkNotNull(bean.target)
+        when {
+            target.tests != null -> InvestigationTargetType.TEST
+            target.problems != null -> InvestigationTargetType.BUILD_PROBLEM
+            else -> InvestigationTargetType.BUILD_CONFIGURATION
         }
-    val targetType: InvestigationTargetType
-        get() {
-            val target = bean.target!!
-            if (target.tests != null) return InvestigationTargetType.TEST
-            if (target.problems != null) return InvestigationTargetType.BUILD_PROBLEM
-            return InvestigationTargetType.BUILD_CONFIGURATION
-        }
+    }
 
-    val testIds: List<TestId>?
-        get() = bean.target?.tests?.test?.map { x -> TestId(x.id!!) }
+    val testIds: List<TestId>? by lazy { bean.target?.tests?.test?.map { x -> TestId(x.id!!) } }
 
-    val problemIds: List<BuildProblemId>?
-        get() = bean.target?.problems?.problem?.map { x -> BuildProblemId(x.id!!) }
+    val problemIds: List<BuildProblemId>? by lazy {
+        bean.target?.problems?.problem?.map { x -> BuildProblemId(x.id!!) }
+    }
 
-    val scope: InvestigationScope
-        get() {
+    val scope: InvestigationScope by lazy {
             val scope = bean.scope!!
-            val project = scope.project?.let { bean -> ProjectImpl(bean, false, instance) }
+            val project = scope.project?.let { bean -> ProjectRefImpl(bean, instance) }
             if (project != null) {
-                return InvestigationScope.InProject(project)
+                return@lazy InvestigationScope.InProject(project)
             }
 
             /* neither teamcity.jetbrains nor buildserver contain more then one assignment build type */
@@ -889,9 +874,9 @@ private abstract class InvestigationMuteBaseImpl<TBean : InvestigationMuteBaseBe
                 throw IllegalStateException("more then one buildType")
             }
             val buildConfiguration =
-                scope.buildTypes?.let { bean -> BuildConfigurationImpl(bean.buildType[0], false, instance) }
+                scope.buildTypes?.let { bean -> BuildConfigurationRefImpl(bean.buildType[0], instance) }
             if (buildConfiguration != null) {
-                return InvestigationScope.InBuildConfiguration(buildConfiguration)
+                return@lazy InvestigationScope.InBuildConfiguration(buildConfiguration)
             }
 
             throw IllegalStateException("scope is missed in the bean")
@@ -908,12 +893,9 @@ private class InvestigationImpl(
 
     override fun toString(): String = "Investigation(id=$idString,state=$state)"
 
-    override val assignee: User
-        get() = UserImpl(bean.assignee!!, false, instance)
+    override val assignee: UserRef by lazy { UserRefImpl(bean.assignee!!, instance) }
 
-    override val state: InvestigationState
-        get() = bean.state!!
-
+    override val state: InvestigationState by lazy { bean.state!! }
 }
 
 private class MuteImpl(
@@ -923,31 +905,32 @@ private class MuteImpl(
 ) :
     InvestigationMuteBaseImpl<MuteBean>(bean, isFullProjectBean, instance), Mute {
 
-    override val tests: List<Test>?
-        get() = bean.target?.tests?.test?.map { testBean -> TestImpl(testBean, false, instance) }
+    override val tests: List<TestRef>? by lazy {
+        bean.target?.tests?.test?.map { testBean -> TestImpl(testBean, false, instance) }
+    }
 
-    override val assignee: User?
-        get() {
-            val assignment = bean.assignment ?: return null
-            val userBean = assignment.user ?: return null
-            return UserImpl(userBean, false, instance)
-        }
+    override val assignee: UserRef? by lazy {
+        bean.assignment?.user?.let { UserRefImpl(it, instance) }
+    }
 
     override suspend fun fetchFullBean(): MuteBean = instance.service.mute(id.stringId)
 
     override fun toString(): String = "Investigation(id=$idString)"
 }
 
-private class ProjectImpl(
-    bean: ProjectBean,
-    isFullProjectBean: Boolean,
-    instance: TeamCityCoroutinesInstanceImpl
-) :
-    BaseImpl<ProjectBean>(bean, isFullProjectBean, instance), Project {
-    override suspend fun fetchFullBean(): ProjectBean = instance.service.project(id.stringId)
+private class ProjectRefImpl(
+    override val id: ProjectId,
+    private val instance: TeamCityCoroutinesInstanceImpl
+) : ProjectRef {
+    constructor(stringId: String, instance: TeamCityCoroutinesInstanceImpl) : this(
+        id = ProjectId(stringId),
+        instance = instance
+    )
 
-    override fun toString(): String =
-        if (isFullBean) runBlocking { "Project(id=$idString,name=${getName()})" } else "Project(id=$idString)"
+    constructor(bean: ProjectBean, instance: TeamCityCoroutinesInstanceImpl) : this(
+        stringId = checkNotNull(bean.id),
+        instance = instance
+    )
 
     override fun getHomeUrl(branch: String?): String =
         getUserUrlPage(instance.serverUrl, "project.html", projectId = id, branch = branch)
@@ -959,29 +942,13 @@ private class ProjectImpl(
         tab = "testDetails"
     )
 
-    override val id: ProjectId
-        get() = ProjectId(idString)
-
-    override suspend fun getName(): String = notnull { it.name }
-
-    override suspend fun isArchived(): Boolean = nullable { it.archived } ?: false
-
-    override suspend fun getParentProjectId(): ProjectId? = nullable { it.parentProjectId }?.let { ProjectId(it) }
-
-    override suspend fun getChildProjects(): List<Project> {
-        return fullBean.getValue().projects!!.project.map { ProjectImpl(it, false, instance) }
-    }
-
-    override suspend fun getBuildConfigurations(): List<BuildConfiguration> {
-        return fullBean.getValue().buildTypes!!.buildType.map { BuildConfigurationImpl(it, false, instance) }
-    }
-
-    override suspend fun getParameters(): List<Parameter> {
-        return fullBean.getValue().parameters!!.property!!.map { ParameterImpl(it) }
+    override suspend fun resolve(): Project {
+        val bean = instance.service.project(id.stringId)
+        return ProjectImpl(bean, instance, this)
     }
 
     override suspend fun setParameter(name: String, value: String) {
-        LOG.info("Setting parameter $name=$value in ProjectId=$idString")
+        LOG.info("Setting parameter $name=$value in ProjectId=${id.stringId}")
         instance.service.setProjectParameter(id.stringId, name, value.toRequestBody())
     }
 
@@ -991,13 +958,13 @@ private class ProjectImpl(
                 attribute("name", name)
                 attribute("id", id.stringId)
                 element("parentProject") {
-                    attribute("locator", "id:${this@ProjectImpl.id.stringId}")
+                    attribute("locator", "id:${this@ProjectRefImpl.id.stringId}")
                 }
             }
         }
 
-        val projectBean = instance.service.createProject(projectXmlDescription.toRequestBody())
-        return ProjectImpl(projectBean, true, instance)
+        val bean = instance.service.createProject(projectXmlDescription.toRequestBody())
+        return ProjectImpl(bean, instance)
     }
 
     override suspend fun createVcsRoot(
@@ -1013,7 +980,7 @@ private class ProjectImpl(
                 attribute("vcsName", type.stringType)
 
                 element("project") {
-                    attribute("id", this@ProjectImpl.idString)
+                    attribute("id", this@ProjectRefImpl.id.stringId)
                 }
 
                 element("properties") {
@@ -1031,42 +998,66 @@ private class ProjectImpl(
         return VcsRootImpl(vcsRootBean, true, instance)
     }
 
-    override suspend fun createBuildConfiguration(buildConfigurationDescriptionXml: String): BuildConfiguration {
+    override suspend fun createBuildConfiguration(buildConfigurationDescriptionXml: String): BuildConfigurationRef {
         val bean = instance.service.createBuildType(buildConfigurationDescriptionXml.toRequestBody())
-        return BuildConfigurationImpl(bean, false, instance)
+        return BuildConfigurationRefImpl(bean, instance)
     }
+
+    override fun toString(): String = "ProjectRef(id=$id)"
 }
 
-private class BuildConfigurationImpl(
-    bean: BuildTypeBean,
-    isFullBean: Boolean,
-    instance: TeamCityCoroutinesInstanceImpl
-) :
-    BaseImpl<BuildTypeBean>(bean, isFullBean, instance), BuildConfiguration {
-    override suspend fun fetchFullBean(): BuildTypeBean = instance.service.buildConfiguration(idString)
+private class ProjectImpl(
+    bean: ProjectBean,
+    instance: TeamCityCoroutinesInstanceImpl,
+    ref: ProjectRef = ProjectRefImpl(bean, instance)
+) : Project, ProjectRef by ref {
+    init {
+        check(ref.id.stringId == bean.id)
+    }
 
-    override fun toString(): String =
-        if (isFullBean) runBlocking { "BuildConfiguration(id=$idString,name=${getName()})" } else "BuildConfiguration(id=$idString)"
+    override val name: String = checkNotNull(bean.name)
+    override val archived: Boolean = bean.archived ?: false
+    override val parameters: List<Parameter> = checkNotNull(bean.parameters?.property).map { ParameterImpl(it) }
+
+    override val parentProject: ProjectRef? = bean.parentProjectId?.let { ProjectRefImpl(it, instance) }
+
+    override val childProjects: List<ProjectRef> = checkNotNull(bean.projects).project.map {
+        ProjectRefImpl(ProjectId(checkNotNull(it.id)), instance)
+    }
+
+    override val buildConfigurations: List<BuildConfigurationRef> = checkNotNull(bean.buildTypes).buildType.map {
+        BuildConfigurationRefImpl(it, instance)
+    }
+
+    override fun toString(): String = "Project(id='$id',name='$name', archived=$archived, parentProject=$parentProject)"
+}
+
+private class BuildConfigurationRefImpl(
+    override val id: BuildConfigurationId,
+    private val instance: TeamCityCoroutinesInstanceImpl,
+) : BuildConfigurationRef {
+    constructor(bean: BuildTypeBean, instance: TeamCityCoroutinesInstanceImpl) : this(
+        id = BuildConfigurationId(checkNotNull(bean.id)),
+        instance = instance
+    )
+
+    override fun toString(): String = "BuildConfigurationRef(id=$id)"
+
+    override suspend fun resolve(): BuildConfiguration {
+        val bean = instance.service.buildConfiguration(id.stringId)
+        return BuildConfigurationImpl(bean, instance, this)
+    }
 
     override fun getHomeUrl(branch: String?): String = getUserUrlPage(
         instance.serverUrl, "viewType.html", buildTypeId = id, branch = branch
     )
 
-    override suspend fun getName(): String = notnull { it.name }
-
-    override suspend fun getProjectId(): ProjectId = ProjectId(notnull { it.projectId })
-
-    override val id: BuildConfigurationId
-        get() = BuildConfigurationId(idString)
-
-    override suspend fun isPaused(): Boolean = nullable { it.paused } ?: false // TC won't return paused:false field
-
     override suspend fun getBuildTags(): List<String> {
-        return instance.service.buildTypeTags(idString).tag!!.map { it.name!! }
+        return instance.service.buildTypeTags(id.stringId).tag!!.map { it.name!! }
     }
 
     override suspend fun getFinishBuildTriggers(): List<FinishBuildTrigger> {
-        return instance.service.buildTypeTriggers(idString)
+        return instance.service.buildTypeTriggers(id.stringId)
             .trigger
             ?.filter { it.type == "buildDependencyTrigger" }
             ?.map { FinishBuildTriggerImpl(it) }.orEmpty()
@@ -1074,39 +1065,26 @@ private class BuildConfigurationImpl(
 
     override suspend fun getArtifactDependencies(): List<ArtifactDependency> {
         return instance.service
-            .buildTypeArtifactDependencies(idString)
+            .buildTypeArtifactDependencies(id.stringId)
             .`artifact-dependency`
             ?.filter { it.disabled == false }
-            ?.map { ArtifactDependencyImpl(it, true, instance) }.orEmpty()
-    }
-
-    override suspend fun getBuildCounter(): Int {
-        return getSetting("buildNumberCounter")?.toIntOrNull()
-            ?: throw TeamCityQueryException("Cannot get 'buildNumberCounter' setting for $idString")
+            ?.map { ArtifactDependencyImpl(it, instance) }.orEmpty()
     }
 
     override suspend fun setBuildCounter(value: Int) {
-        LOG.info("Setting build counter to '$value' in BuildConfigurationId=$idString")
-        instance.service.setBuildTypeSettings(idString, "buildNumberCounter", value.toString().toRequestBody())
-    }
-
-    override suspend fun getBuildNumberFormat(): String {
-        return getSetting("buildNumberPattern")
-            ?: throw TeamCityQueryException("Cannot get 'buildNumberPattern' setting for $idString")
+        LOG.info("Setting build counter to '$value' in BuildConfigurationId=${id.stringId}")
+        instance.service.setBuildTypeSettings(id.stringId, "buildNumberCounter", value.toString().toRequestBody())
     }
 
     override suspend fun setBuildNumberFormat(format: String) {
-        LOG.info("Setting build number format to '$format' in BuildConfigurationId=$idString")
-        instance.service.setBuildTypeSettings(idString, "buildNumberPattern", format.toRequestBody())
+        LOG.info("Setting build number format to '$format' in BuildConfigurationId=${id.stringId}")
+        instance.service.setBuildTypeSettings(id.stringId, "buildNumberPattern", format.toRequestBody())
     }
 
     override suspend fun setParameter(name: String, value: String) {
-        LOG.info("Setting parameter $name=$value in BuildConfigurationId=$idString")
-        instance.service.setBuildTypeParameter(idString, name, value.toRequestBody())
+        LOG.info("Setting parameter $name=$value in BuildConfigurationId=${id.stringId}")
+        instance.service.setBuildTypeParameter(id.stringId, name, value.toRequestBody())
     }
-
-    private suspend fun getSetting(settingName: String) =
-        nullable { it.settings }?.property?.firstOrNull { it.name == settingName }?.value
 
     override suspend fun runBuild(
         parameters: Map<String, String>?,
@@ -1119,10 +1097,10 @@ private class BuildConfigurationImpl(
         personal: Boolean,
         revisions: List<SpecifiedRevision>?,
         dependencies: List<BuildId>?
-    ): Build {
+    ): BuildRef {
         val request = TriggerBuildRequestBean()
 
-        request.buildType = BuildTypeBean().apply { id = this@BuildConfigurationImpl.idString }
+        request.buildType = BuildTypeBean().apply { id = this@BuildConfigurationRefImpl.id.stringId }
         request.branchName = logicalBranchName
         comment?.let { commentText -> request.comment = CommentBean().apply { text = commentText } }
         request.personal = personal
@@ -1162,6 +1140,31 @@ private class BuildConfigurationImpl(
     }
 }
 
+private class BuildConfigurationImpl(
+    bean: BuildTypeBean,
+    instance: TeamCityCoroutinesInstanceImpl,
+    ref: BuildConfigurationRef = BuildConfigurationRefImpl(bean, instance)
+) : BuildConfiguration, BuildConfigurationRef by ref {
+    init {
+        check(ref.id.stringId == bean.id)
+    }
+
+    override val name: String = checkNotNull(bean.name)
+    override val projectRef: ProjectRef = ProjectRefImpl(checkNotNull(bean.projectId), instance)
+    override val paused: Boolean = bean.paused ?: false
+
+    override val buildCounter: Int = bean.getSetting("buildNumberCounter")?.toIntOrNull()
+        ?: throw TeamCityQueryException("Cannot get 'buildNumberCounter' setting for ${id.stringId}")
+
+    override val buildNumberFormat: String = bean.getSetting("buildNumberPattern")
+        ?: throw TeamCityQueryException("Cannot get 'buildNumberPattern' setting for ${id.stringId}")
+
+    override fun toString(): String = "Build(id=${id.stringId},name='$name')"
+
+    private fun BuildTypeBean.getSetting(settingName: String): String? =
+        settings?.property?.firstOrNull { it.name == settingName }?.value
+}
+
 private class VcsRootLocatorImpl(private val instance: TeamCityCoroutinesInstanceImpl) : VcsRootLocatorEx {
     override fun all(): Flow<VcsRoot> = lazyPagingFlow(instance,
         getFirstBean = {
@@ -1178,13 +1181,19 @@ private class VcsRootLocatorImpl(private val instance: TeamCityCoroutinesInstanc
         convertToPage = { bean -> Page(bean.`vcs-root`.map { VcsRootImpl(it, false, instance) }, bean.nextHref) })
 }
 
-private class ChangeImpl(
-    bean: ChangeBean,
-    isFullBean: Boolean,
-    instance: TeamCityCoroutinesInstanceImpl
-) :
-    BaseImpl<ChangeBean>(bean, isFullBean, instance), Change {
-    override suspend fun fetchFullBean(): ChangeBean = instance.service.change(changeId = idString)
+private class ChangeRefImpl(
+    override val id: ChangeId,
+    private val instance: TeamCityCoroutinesInstanceImpl,
+) : ChangeRef {
+    constructor(bean: ChangeBean, instance: TeamCityCoroutinesInstanceImpl) : this(
+        id = ChangeId(checkNotNull(bean.id)),
+        instance = instance
+    )
+
+    override suspend fun resolve(): Change {
+        val bean = instance.service.change(changeId = id.stringId)
+        return ChangeImpl(bean, instance, this)
+    }
 
     override fun getHomeUrl(
         specificBuildConfigurationId: BuildConfigurationId?,
@@ -1196,42 +1205,37 @@ private class ChangeImpl(
         personal = includePersonalBuilds
     )
 
-    override suspend fun firstBuilds(): List<Build> =
+    override suspend fun firstBuilds(): List<BuildRef> =
         instance.service
             .changeFirstBuilds(id.stringId)
             .build
-            .map { BuildImpl(it, false, instance) }
-
-    override val id: ChangeId
-        get() = ChangeId(idString)
-
-    override suspend fun getVersion(): String = notnull { it.version }
-
-    override suspend fun getUsername(): String = notnull { it.username }
-
-    override suspend fun getUser(): User? = nullable { it.user }?.let { UserImpl(it, false, instance) }
-
-    override suspend fun getDateTime(): ZonedDateTime =
-        ZonedDateTime.parse(notnull { it.date }, teamCityServiceDateFormat)
-
-    override suspend fun getComment(): String = notnull { it.comment }
-
-    override suspend fun getVcsRootInstance(): VcsRootInstance? =
-        nullable { it.vcsRootInstance }?.let { VcsRootInstanceImpl(it) }
+            .map { BuildRefImpl(it, instance) }
 
     override suspend fun getFiles(): List<ChangeFile> {
         return instance.service.changeFiles(id.stringId).files?.file?.map { ChangeFileImpl(it) } ?: emptyList()
     }
 
-    override fun toString(): String {
-        return if (isFullBean) {
-            runBlocking {
-                "Change(id=$id, version=${getVersion()}, username=${getUsername()}, user=${getUser()}, date=${getDateTime()}, comment=${getComment()}, vcsRootInstance=${getVcsRootInstance()})"
-            }
-        } else {
-            "Change(id=$id)"
-        }
+    override fun toString(): String = "ChangeRef(id=$id)"
+}
+
+private class ChangeImpl(
+    bean: ChangeBean,
+    instance: TeamCityCoroutinesInstanceImpl,
+    ref: ChangeRef = ChangeRefImpl(bean, instance)
+) : Change, ChangeRef by ref {
+    init {
+        check(ref.id.stringId == bean.id)
     }
+
+    override val version: String = checkNotNull(bean.version)
+    override val username: String = checkNotNull(bean.username)
+    override val user: UserRef? = bean.user?.let { userBean -> UserRefImpl(userBean, instance) }
+    override val dateTime: ZonedDateTime = ZonedDateTime.parse(checkNotNull(bean.date), teamCityServiceDateFormat)
+    override val comment: String = checkNotNull(bean.comment)
+    override val vcsRootInstance: VcsRootInstance? = bean.vcsRootInstance?.let(::VcsRootInstanceImpl)
+
+    override fun toString() = "Change(id=$id, version=${version}, username=${username}, user=${user}, " +
+            "date=${dateTime}, comment=${comment}, vcsRootInstance=${vcsRootInstance})"
 }
 
 private class ChangeFileImpl(private val bean: ChangeFileBean) : ChangeFile {
@@ -1255,35 +1259,48 @@ private class ChangeFileImpl(private val bean: ChangeFileBean) : ChangeFile {
     }
 }
 
-private class UserImpl(
-    bean: UserBean,
-    isFullBuildBean: Boolean,
-    instance: TeamCityCoroutinesInstanceImpl
-) :
-    BaseImpl<UserBean>(bean, isFullBuildBean, instance), User {
+private class UserRefImpl(
+    override val id: UserId,
+    private val instance: TeamCityCoroutinesInstanceImpl,
+) : UserRef {
+    constructor(bean: UserBean, instance: TeamCityCoroutinesInstanceImpl) : this(
+        id = UserId(checkNotNull(bean.id)),
+        instance = instance
+    )
 
-    override suspend fun fetchFullBean(): UserBean = instance.service.users("id:${id.stringId}")
-
-    override suspend fun getEmail(): String? = nullable { it.email }
-
-    override val id: UserId
-        get() = UserId(idString)
-
-    override suspend fun getUsername(): String = notnull { it.username }
-
-    override suspend fun getName(): String? = nullable { it.name }
+    override suspend fun resolve(): User {
+        val bean = instance.service.users("id:${id.stringId}")
+        return UserImpl(bean, this)
+    }
 
     override fun getHomeUrl(): String = getUserUrlPage(
         instance.serverUrl, "admin/editUser.html",
         userId = id
     )
 
-    override fun toString(): String =
-        if (isFullBean) runBlocking { "User(id=${id.stringId}, username=${getUsername()})" } else "User(id=${id.stringId})"
+    override fun toString(): String = "UserRef(id=${id.stringId})"
+}
+
+private class UserImpl(
+    bean: UserBean,
+    ref: UserRef
+) : User, UserRef by ref {
+    constructor(bean: UserBean, instance: TeamCityCoroutinesInstanceImpl) : this(
+        bean = bean,
+        ref = UserRefImpl(bean, instance)
+    )
+
+    init {
+        check(ref.id.stringId == bean.id)
+    }
+
+    override val username: String = checkNotNull(bean.username)
+    override val name: String? = bean.name
+    override val email: String? = bean.name
 }
 
 private class PinInfoImpl(bean: PinInfoBean, instance: TeamCityCoroutinesInstanceImpl) : PinInfo {
-    override val user = UserImpl(bean.user!!, false, instance)
+    override val user by lazy { UserRefImpl(bean.user!!, instance) }
     override val dateTime: ZonedDateTime = ZonedDateTime.parse(bean.timestamp!!, teamCityServiceDateFormat)
 }
 
@@ -1291,28 +1308,22 @@ private class TriggeredImpl(
     private val bean: TriggeredBean,
     private val instance: TeamCityCoroutinesInstanceImpl
 ) : TriggeredInfo {
-    override val user: User?
-        get() = if (bean.user != null) UserImpl(bean.user!!, false, instance) else null
-    override val build: Build?
-        get() = if (bean.build != null) BuildImpl(bean.build, false, instance) else null
+    override val user: UserRef? by lazy { bean.user?.let { UserRefImpl(it, instance) } }
+    override val build: BuildRef? by lazy { bean.build?.let { BuildRefImpl(it, instance) } }
 }
 
 private class BuildCanceledInfoImpl(
     private val bean: BuildCanceledBean,
     private val instance: TeamCityCoroutinesInstanceImpl
 ) : BuildCanceledInfo {
-    override val cancelDateTime: ZonedDateTime
-        get() = ZonedDateTime.parse(bean.timestamp!!, teamCityServiceDateFormat)
-    override val user: User?
-        get() = if (bean.user != null) UserImpl(bean.user!!, false, instance) else null
-    override val text: String
-        get() = bean.text ?: ""
+    override val cancelDateTime: ZonedDateTime by lazy {
+        ZonedDateTime.parse(bean.timestamp!!, teamCityServiceDateFormat)
+    }
+    override val user: UserRef? by lazy { bean.user?.let { UserRefImpl(it, instance) } }
+    override val text: String = bean.text ?: ""
 }
 
 private class ParameterImpl(private val bean: ParameterBean) : Parameter {
-    init {
-        println("Creating bean")
-    }
     override val name: String
         get() = bean.name!!
 
@@ -1345,35 +1356,26 @@ private class FinishBuildTriggerImpl(private val bean: TriggerBean) : FinishBuil
 }
 
 private class ArtifactDependencyImpl(
-    bean: ArtifactDependencyBean,
-    isFullBean: Boolean,
-    instance: TeamCityCoroutinesInstanceImpl
-) :
-    BaseImpl<ArtifactDependencyBean>(bean, isFullBean, instance), ArtifactDependency {
-
-    override suspend fun fetchFullBean(): ArtifactDependencyBean {
-        error("Not supported, ArtifactDependencyImpl should be created with full bean")
-    }
-
+    private val bean: ArtifactDependencyBean,
+    private val instance: TeamCityCoroutinesInstanceImpl
+) : ArtifactDependency {
     override fun toString(): String = "ArtifactDependency(buildConf=${dependsOnBuildConfiguration.id.stringId})"
 
-    override val dependsOnBuildConfiguration: BuildConfiguration
-        get() = BuildConfigurationImpl(bean.`source-buildType`, false, instance)
+    override val dependsOnBuildConfiguration: BuildConfigurationRef
+        get() = BuildConfigurationRefImpl(bean.`source-buildType`, instance)
 
-    override suspend fun getBranch(): String? {
-        return findPropertyByName("revisionBranch")
+    override val branch: String? by lazy { findPropertyByName("revisionBranch") }
+
+    override val artifactRules: List<ArtifactRule> by lazy {
+        checkNotNull(findPropertyByName("pathRules")).split(' ').map(::ArtifactRuleImpl)
     }
 
-    override suspend fun getArtifactRules(): List<ArtifactRule> {
-        return findPropertyByName("pathRules")!!.split(' ').map { ArtifactRuleImpl(it) }
+    override val cleanDestinationDirectory: Boolean by lazy {
+        checkNotNull(findPropertyByName("cleanDestinationDirectory")).toBoolean()
     }
 
-    override suspend fun isCleanDestinationDirectory(): Boolean {
-        return findPropertyByName("cleanDestinationDirectory")!!.toBoolean()
-    }
-
-    private suspend fun findPropertyByName(name: String): String? {
-        return fullBean.getValue().properties?.property?.find { it.name == name }?.value
+    private fun findPropertyByName(name: String): String? {
+        return bean.properties?.property?.find { it.name == name }?.value
     }
 }
 
@@ -1395,8 +1397,8 @@ private class BuildProblemOccurrenceImpl(
 ) : BuildProblemOccurrence {
     override val buildProblem: BuildProblem
         get() = BuildProblemImpl(bean.problem!!)
-    override val build: Build
-        get() = BuildImpl(bean.build!!, false, instance)
+    override val build: BuildRef
+        get() = BuildRefImpl(bean.build!!, instance)
     override val details: String
         get() = bean.details ?: ""
     override val additionalData: String?
@@ -1489,138 +1491,37 @@ private inline fun <reified Bean, T> lazyPagingSequence(
     }
 }
 
-private class BuildImpl(
-    bean: BuildBean,
-    isFullBean: Boolean,
-    instance: TeamCityCoroutinesInstanceImpl
-) : BaseImpl<BuildBean>(bean, isFullBean, instance), BuildEx {
-    override suspend fun fetchFullBean(): BuildBean = instance.service.build(id.stringId)
+private class BuildRefImpl(
+    override val id: BuildId,
+    private val instance: TeamCityCoroutinesInstanceImpl
+) : BuildRefEx {
+    constructor(bean: BuildBean, instance: TeamCityCoroutinesInstanceImpl) : this(
+        id = BuildId(checkNotNull(bean.id)),
+        instance = instance
+    )
+
+    override suspend fun resolve(): Build {
+        val bean = instance.service.build(id.stringId)
+        return BuildImpl(bean, instance, this)
+    }
 
     override fun getHomeUrl(): String = getUserUrlPage(
         instance.serverUrl, "viewLog.html",
         buildId = id
     )
 
-    override suspend fun getStatusText(): String? {
-        return fullBean.getValue().statusText
-    }
-
-    override suspend fun getQueuedDateTime(): ZonedDateTime {
-        return fullBean.getValue().queuedDate!!.let { ZonedDateTime.parse(it, teamCityServiceDateFormat) }
-    }
-
-    override suspend fun getStartDateTime(): ZonedDateTime? {
-        return fullBean.getValue().startDate?.let { ZonedDateTime.parse(it, teamCityServiceDateFormat) }
-    }
-
-    override suspend fun getFinishDateTime(): ZonedDateTime? {
-        return fullBean.getValue().finishDate?.let { ZonedDateTime.parse(it, teamCityServiceDateFormat) }
-    }
-
-    override suspend fun getRunningInfo(): BuildRunningInfo? {
-        return fullBean.getValue().`running-info`?.let { BuildRunningInfoImpl(it) }
-    }
-
-    override suspend fun getParameters(): List<Parameter> {
-        return fullBean.getValue().properties!!.property!!.map { ParameterImpl(it) }
-    }
-
-    override suspend fun getTags(): List<String> {
-        return fullBean.getValue().tags?.tag?.map { it.name!! } ?: emptyList()
-    }
-
-    override suspend fun getRevisions(): List<Revision> {
-        return fullBean.getValue().revisions!!.revision!!.map { RevisionImpl(it) }
-    }
-
-    override suspend fun getChanges(): List<Change> {
-        return instance.service.changes(
-            "build:$idString",
-            "change(id,version,username,user,date,comment,vcsRootInstance)"
-        )
-            .change!!.map { ChangeImpl(it, true, instance) }
-    }
-
-    override suspend fun getSnapshotDependencies(): List<Build> {
-        return fullBean.getValue().`snapshot-dependencies`?.build?.map { BuildImpl(it, false, instance) } ?: emptyList()
-    }
-
-    override suspend fun getPinInfo(): PinInfo? {
-        return fullBean.getValue().pinInfo?.let { PinInfoImpl(it, instance) }
-    }
-
-    override suspend fun getTriggeredInfo(): TriggeredInfo? {
-        return fullBean.getValue().triggered?.let { TriggeredImpl(it, instance) }
-    }
-
-    override suspend fun getAgent(): BuildAgent? {
-        val agentBean = fullBean.getValue().agent
-        if (agentBean?.id == null) {
-            return null
-        }
-        return BuildAgentImpl(agentBean, false, instance)
-    }
-
-    override val id: BuildId
-        get() = BuildId(idString)
-
-    override suspend fun getBuildConfigurationId(): BuildConfigurationId =
-        BuildConfigurationId(notnull { it.buildTypeId })
-
-    override suspend fun getBuildNumber(): String? = nullable { it.number }
-
-    override suspend fun getStatus(): BuildStatus? = nullable { it.status }
-
-    override suspend fun getState(): BuildState = try {
-        val state = notnull { it.state }
-        BuildState.valueOf(state.uppercase())
-    } catch (e: IllegalArgumentException) {
-        BuildState.UNKNOWN
-    }
-
-    override suspend fun isPersonal(): Boolean = nullable { it.personal } ?: false
-
-    private val thisName = bean.buildType?.name
-
-    override suspend fun getName(): String {
-        return thisName ?: instance.buildConfiguration(getBuildConfigurationId()).getName()
-    }
-
-    override suspend fun getCanceledInfo(): BuildCanceledInfo? {
-        return fullBean.getValue().canceledInfo?.let { BuildCanceledInfoImpl(it, instance) }
-    }
-
-    override suspend fun getComment(): BuildCommentInfo? {
-        return fullBean.getValue().comment?.let { BuildCommentInfoImpl(it, instance) }
-    }
-
-    override suspend fun isComposite(): Boolean? {
-        return fullBean.getValue().composite
-    }
-
-    override suspend fun getBranch(): Branch {
-        val branchName = nullable { it.branchName }
-        val isDefaultBranch = nullable { it.defaultBranch }
-        return BranchImpl(
-            name = branchName,
-            isDefault = isDefaultBranch ?: (branchName == null)
-        )
-    }
-
-    override fun toString(): String =
-        if (isFullBean) runBlocking { "Build{id=$id, buildConfigurationId=${getBuildConfigurationId()}, buildNumber=${getBuildNumber()}, status=${getStatus()}, branch=${getBranch()}}" }
-        else "Build{id=$id}"
-
-    override suspend fun isDetachedFromAgent(): Boolean = nullable { it.detachedFromAgent } ?: false
-
-    override fun getTestRuns(status: TestStatus?): Flow<TestRun> = instance
+    override fun getTestRuns(status: TestStatus?): Flow<TestRunRef> = instance
         .testRuns()
         .forBuild(id)
         .let { if (status == null) it else it.withStatus(status) }
         .all()
 
+    override suspend fun getChanges(): List<Change> = instance.service.changes(
+        "build:${id.stringId}",
+        "change(id,version,username,user,date,comment,vcsRootInstance)"
+    ).change!!.map { ChangeImpl(it, instance) }
 
-    override fun getTestRunsSeq(status: TestStatus?): Sequence<TestRun> = (instance
+    override fun getTestRunsSeq(status: TestStatus?): Sequence<TestRunRef> = (instance
             .testRuns()
             .forBuild(id)
             .let { if (status == null) it else it.withStatus(status) } as TestRunsLocatorEx)
@@ -1654,28 +1555,28 @@ private class BuildImpl(
 
     override suspend fun addTag(tag: String) {
         LOG.info("Adding tag $tag to build ${getHomeUrl()}")
-        instance.service.addTag(idString, tag.toRequestBody())
+        instance.service.addTag(id.stringId, tag.toRequestBody())
     }
 
     override suspend fun setComment(comment: String) {
         LOG.info("Adding comment $comment to build ${getHomeUrl()}")
-        instance.service.setComment(idString, comment.toRequestBody())
+        instance.service.setComment(id.stringId, comment.toRequestBody())
     }
 
     override suspend fun replaceTags(tags: List<String>) {
         LOG.info("Replacing tags of build ${getHomeUrl()} with ${tags.joinToString(", ")}")
         val tagBeans = tags.map { tag -> TagBean().apply { name = tag } }
-        instance.service.replaceTags(idString, TagsBean().apply { tag = tagBeans })
+        instance.service.replaceTags(id.stringId, TagsBean().apply { tag = tagBeans })
     }
 
     override suspend fun pin(comment: String) {
         LOG.info("Pinning build ${getHomeUrl()}")
-        instance.service.pin(idString, comment.toRequestBody())
+        instance.service.pin(id.stringId, comment.toRequestBody())
     }
 
     override suspend fun unpin(comment: String) {
         LOG.info("Unpinning build ${getHomeUrl()}")
-        instance.service.unpin(idString, comment.toRequestBody())
+        instance.service.unpin(id.stringId, comment.toRequestBody())
     }
 
     override suspend fun getArtifacts(parentPath: String, recursive: Boolean, hidden: Boolean): List<BuildArtifact> {
@@ -1704,11 +1605,11 @@ private class BuildImpl(
         val result = list.filter { regexp.matches(it.name) }
         if (result.isEmpty()) {
             val available = list.joinToString(",") { it.name }
-            throw TeamCityQueryException("Artifact $pattern not found in build ${getBuildNumber()}. Available artifacts: $available.")
+            throw TeamCityQueryException("Artifact $pattern not found for buildId=${id.stringId}. Available artifacts: $available.")
         }
         if (result.size > 1) {
             val names = result.joinToString(",") { it.name }
-            throw TeamCityQueryException("Several artifacts matching $pattern are found in build ${getBuildNumber()}: $names.")
+            throw TeamCityQueryException("Several artifacts matching $pattern are found for buildId=${id.stringId}: $names.")
         }
         return result.first()
     }
@@ -1719,7 +1620,7 @@ private class BuildImpl(
         val matched = list.filter { regexp.matches(it.fullName) }
         if (matched.isEmpty()) {
             val available = list.joinToString(",") { it.fullName }
-            throw TeamCityQueryException("No artifacts matching $pattern are found in build ${getBuildNumber()}. Available artifacts: $available.")
+            throw TeamCityQueryException("No artifacts matching $pattern are found for buildId=${id.stringId}. Available artifacts: $available.")
         }
         outputDir.mkdirs()
         matched.forEach {
@@ -1793,6 +1694,87 @@ private class BuildImpl(
     override suspend fun finish() {
         instance.service.finishBuild(id.stringId)
     }
+
+    override fun toString(): String = "BuildRef(id=$id)"
+}
+
+private class BuildImpl(
+    bean: BuildBean,
+    instance: TeamCityCoroutinesInstanceImpl,
+    ref: BuildRefEx,
+) : Build, BuildRefEx by ref {
+    init {
+        check(ref.id.stringId == bean.id)
+    }
+
+    override val buildNumber: String? = bean.number
+    override val status: BuildStatus? = bean.status
+
+    override val buildConfigurationRef: BuildConfigurationRef =
+        BuildConfigurationRefImpl(BuildConfigurationId(checkNotNull(bean.buildTypeId)), instance)
+
+
+    override val branch: Branch by lazy {
+        val branchName = bean.branchName
+        val isDefaultBranch = bean.defaultBranch
+        BranchImpl(name = branchName, isDefault = isDefaultBranch ?: (branchName == null))
+    }
+
+    override val state: BuildState by lazy {
+        try {
+            val state = checkNotNull(bean.state)
+            BuildState.valueOf(state.uppercase())
+        } catch (e: IllegalArgumentException) {
+            BuildState.UNKNOWN
+        }
+    }
+
+    override val personal: Boolean = bean.personal ?: false
+    override val name: String? = bean.buildType?.name
+
+    override val canceledInfo: BuildCanceledInfo? by lazy {
+        bean.canceledInfo?.let { BuildCanceledInfoImpl(it, instance) }
+    }
+    override val comment: BuildCommentInfo? by lazy { bean.comment?.let { BuildCommentInfoImpl(it, instance) } }
+    override val composite: Boolean? = bean.composite
+    override val statusText: String? = bean.statusText
+    override val queuedDateTime: ZonedDateTime by lazy {
+        checkNotNull(bean.queuedDate).let { ZonedDateTime.parse(it, teamCityServiceDateFormat) }
+    }
+    override val startDateTime: ZonedDateTime? by lazy {
+        bean.startDate?.let { ZonedDateTime.parse(it, teamCityServiceDateFormat) }
+    }
+    override val finishDateTime: ZonedDateTime? by lazy {
+        bean.finishDate?.let { ZonedDateTime.parse(it, teamCityServiceDateFormat) }
+    }
+
+    override val runningInfo: BuildRunningInfo? by lazy { bean.`running-info`?.let { BuildRunningInfoImpl(it) } }
+
+    override val parameters: List<Parameter> by lazy { bean.properties!!.property!!.map { ParameterImpl(it) } }
+
+    override val tags: List<String> by lazy { bean.tags?.tag?.map { it.name!! } ?: emptyList() }
+
+    override val revisions: List<Revision> by lazy { bean.revisions!!.revision!!.map { RevisionImpl(it) } }
+
+    override val snapshotDependencies: List<BuildRef> by lazy {
+        bean.`snapshot-dependencies`?.build?.map { BuildRefImpl(it, instance) } ?: emptyList()
+    }
+
+    override val pinInfo: PinInfo? by lazy { bean.pinInfo?.let { PinInfoImpl(it, instance) } }
+    override val triggeredInfo: TriggeredInfo? by lazy { bean.triggered?.let { TriggeredImpl(it, instance) } }
+
+    override val agentRef: BuildAgentRef? by lazy {
+        val agentBean = bean.agent
+        if (agentBean?.id == null) {
+            return@lazy null
+        }
+        BuildAgentImpl(agentBean, false, instance)
+    }
+
+    override val detachedFromAgent: Boolean = bean.detachedFromAgent ?: false
+
+    override fun toString() = "Build{id=$id, buildConfigurationId=${buildConfigurationRef.id}, " +
+            "buildNumber=${buildNumber}, status=${status}, branch=${branch}}"
 }
 
 private class TestImpl(
@@ -1889,7 +1871,7 @@ private class BuildAgentPoolImpl(
     override suspend fun getName(): String = notnull { it.name }
 
     override suspend fun getProjects(): List<Project> {
-        return fullBean.getValue().projects?.project?.map { ProjectImpl(it, false, instance) } ?: emptyList()
+        return fullBean.getValue().projects?.project?.map { ProjectImpl(it, instance) } ?: emptyList()
     }
 
     override suspend fun getAgents(): List<BuildAgent> {
@@ -1998,7 +1980,7 @@ private class NameValueProperty(private val bean: NameValuePropertyBean) {
 }
 
 private class BuildArtifactImpl(
-    override val build: Build,
+    override val build: BuildRef,
     override val name: String,
     override val fullName: String,
     override val size: Long?,
@@ -2045,7 +2027,7 @@ private class BuildQueueImpl(private val instance: TeamCityCoroutinesInstanceImp
         return queuedBuildsSeq(parameters)
     }
 
-    private fun queuedBuilds(parameters: List<String>): Flow<BuildImpl> = lazyPagingFlow(instance,
+    private fun queuedBuilds(parameters: List<String>): Flow<BuildRef> = lazyPagingFlow(instance,
         getFirstBean = {
             val buildLocator = if (parameters.isNotEmpty()) parameters.joinToString(",") else null
             LOG.debug("Retrieving queued builds from ${instance.serverUrl} using query '$buildLocator'")
@@ -2053,12 +2035,12 @@ private class BuildQueueImpl(private val instance: TeamCityCoroutinesInstanceImp
         },
         convertToPage = { buildsBean ->
             Page(
-                data = buildsBean.build.map { BuildImpl(it, false, instance) },
+                data = buildsBean.build.map { BuildRefImpl(it, instance) },
                 nextHref = buildsBean.nextHref
             )
         })
 
-    private fun queuedBuildsSeq(parameters: List<String>): Sequence<BuildImpl> = lazyPagingSequence(instance,
+    private fun queuedBuildsSeq(parameters: List<String>): Sequence<BuildRef> = lazyPagingSequence(instance,
         getFirstBean = {
             val buildLocator = if (parameters.isNotEmpty()) parameters.joinToString(",") else null
             LOG.debug("Retrieving queued builds from ${instance.serverUrl} using query '$buildLocator'")
@@ -2066,7 +2048,7 @@ private class BuildQueueImpl(private val instance: TeamCityCoroutinesInstanceImp
         },
         convertToPage = { buildsBean ->
             Page(
-                data = buildsBean.build.map { BuildImpl(it, false, instance) },
+                data = buildsBean.build.map { BuildRefImpl(it, instance) },
                 nextHref = buildsBean.nextHref
             )
         })
@@ -2075,68 +2057,52 @@ private class BuildQueueImpl(private val instance: TeamCityCoroutinesInstanceImp
 private fun getNameValueProperty(properties: List<NameValueProperty>, name: String): String? =
     properties.singleOrNull { it.name == name }?.value
 
-private open class TestRunImpl(
-    bean: TestOccurrenceBean,
-    isFullBean: Boolean,
-    instance: TeamCityCoroutinesInstanceImpl
-) : TestRun, BaseImpl<TestOccurrenceBean>(bean, isFullBean, instance) {
-    override suspend fun getName(): String = notnull { it.name }
-
-    override val testOccurrenceId: TestOccurrenceId
-        get() = TestOccurrenceId(bean.id!!)
-
-    final override suspend fun getStatus() = when {
-        nullable { it.ignored } == true -> TestStatus.IGNORED
-        nullable { it.status } == "FAILURE" -> TestStatus.FAILED
-        nullable { it.status } == "SUCCESS" -> TestStatus.SUCCESSFUL
-        else -> TestStatus.UNKNOWN
+private open class TestRunRefImpl(
+    override val id: TestRunId,
+    private val instance: TeamCityCoroutinesInstanceImpl,
+) : TestRunRef {
+    override suspend fun resolve(): TestRun {
+        val bean = instance.service.testOccurrence(id.stringId, TestOccurrenceBean.fullFieldsFilter)
+        TODO("Not yet implemented")
     }
-
-    override suspend fun getDuration() = Duration.ofMillis(nullable { it.duration } ?: 0L)!!
-
-    override suspend fun getDetails(): String = when (getStatus()) {
-        TestStatus.IGNORED -> nullable { it.ignoreDetails }
-        TestStatus.FAILED -> nullable { it.details }
-        else -> null
-    } ?: ""
-
-    override suspend fun isIgnored(): Boolean = nullable { it.ignored } ?: false
-
-    override suspend fun isCurrentlyMuted(): Boolean = nullable { it.currentlyMuted } ?: false
-
-    override suspend fun isMutedAtRunningTime(): Boolean = nullable { it.muted } ?: false
-
-    override suspend fun isNewFailure(): Boolean = nullable { it.newFailure } ?: false
-
-    override suspend fun getBuildId(): BuildId = BuildId(notnull { it.build }.id!!)
-
-    override suspend fun getFixedIn(): BuildId? {
-        if (nullable { it.nextFixed }?.id == null)
-            return null
-
-        return BuildId(notnull { it.nextFixed }.id!!)
-    }
-
-    override suspend fun getFirstFailedIn(): BuildId? {
-        if (nullable { it.firstFailed }?.id == null)
-            return null
-
-        return BuildId(notnull { it.firstFailed }.id!!)
-    }
-
-    override suspend fun getMetadataValues(): List<String>? {
-        return nullable { it.metadata }?.typedValues?.map { it.value.toString() }
-    }
-
-    override suspend fun getTestId(): TestId = TestId(notnull { it.test }.id!!)
-
-    override suspend fun fetchFullBean(): TestOccurrenceBean =
-        instance.service.testOccurrence(bean.id!!, TestOccurrenceBean.fullFieldsFilter)
-
-    override fun toString() =
-        if (isFullBean) runBlocking { "Test(id=${bean.id},name=${getName()}, status=${getStatus()}, duration=${getDuration()}, details=${getDetails()})" }
-        else "Test(id=${bean.id})"
 }
+
+private class TestRunImpl(
+    bean: TestOccurrenceBean,
+    instance: TeamCityCoroutinesInstanceImpl,
+    ref: TestRunRef,
+) : TestRun, TestRunRef by ref {
+    override val name: String = checkNotNull(bean.name)
+    override val status: TestStatus by lazy {
+        when {
+            bean.ignored == true -> TestStatus.IGNORED
+            bean.status == "FAILURE" -> TestStatus.FAILED
+            bean.status == "SUCCESS" -> TestStatus.SUCCESSFUL
+            else -> TestStatus.UNKNOWN
+        }
+    }
+    override val duration: Duration = (bean.duration ?: 0L).let(Duration::ofMillis)
+    override val details: String by lazy {
+        when (status) {
+            TestStatus.IGNORED -> bean.ignoreDetails
+            TestStatus.FAILED -> bean.details
+            else -> null
+        } ?: ""
+    }
+    override val ignored: Boolean = bean.ignored ?: false
+    override val currentlyMuted: Boolean = bean.currentlyMuted ?: false
+    override val mutedAtRunningTime: Boolean = bean.muted ?: false
+    override val newFailure: Boolean = bean.newFailure ?: false
+    override val build: BuildRef by lazy { BuildRefImpl(checkNotNull(bean.build), instance) }
+    override val fixedIn: BuildRef? by lazy { bean.nextFixed?.let { BuildRefImpl(it, instance) } }
+    override val firstFailedIn: BuildRef? by lazy { bean.firstFailed?.let { BuildRefImpl(it, instance) } }
+    override val test: TestRef by lazy { TestRefImpl(checkNotNull(bean.test), instance) }
+    override val metadataValues: List<String>? by lazy { bean.metadata?.typedValues?.map { it.value.toString() } }
+    override fun toString(): String = "Test(id=${id},name=${name}, status=${status}, duration=${duration}, " +
+            "details=${details})"
+}
+
+private class TestRefImpl(test: TestBean, instance: TeamCityCoroutinesInstanceImpl) : TestRef
 
 private fun convertToJavaRegexp(pattern: String): Regex {
     return pattern.replace(".", "\\.").replace("*", ".*").replace("?", ".").toRegex()
