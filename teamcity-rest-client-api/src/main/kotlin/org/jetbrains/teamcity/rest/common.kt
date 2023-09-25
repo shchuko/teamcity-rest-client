@@ -118,9 +118,19 @@ data class TestId(val stringId: String) {
     override fun toString(): String = stringId
 }
 
-data class TestOccurrenceId(val stringId: String) {
+@Deprecated(message = "Deprecated due to unclear naming. use TestRunId class", replaceWith = ReplaceWith("TestRunId"))
+sealed class TestOccurrenceId(val stringId: String) {
     override fun toString(): String = stringId
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        return stringId == (other as TestOccurrenceId).stringId
+    }
+
+    override fun hashCode(): Int = stringId.hashCode()
 }
+
+class TestRunId(stringId: String) : TestOccurrenceId(stringId)
 
 data class ChangeId(val stringId: String) {
     override fun toString(): String = stringId
