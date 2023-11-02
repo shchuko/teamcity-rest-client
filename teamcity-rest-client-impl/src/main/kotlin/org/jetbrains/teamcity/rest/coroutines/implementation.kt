@@ -257,6 +257,13 @@ internal class TeamCityCoroutinesInstanceImpl(
 
     override fun mutes(): MuteLocator = MuteLocatorImpl(this)
 
+    override suspend fun createMutes(mutes: List<Mute>) {
+        val bean = MuteListBean().apply {
+            mute = mutes.map(Mute::toMuteBean)
+        }
+        service.createMutes(bean)
+    }
+
     override suspend fun test(testId: TestId): Test = TestImpl(TestBean().apply { id = testId.stringId }, false, this)
     override fun tests(): TestLocator = TestLocatorImpl(this)
     override suspend fun build(id: BuildId): Build = BuildImpl(
@@ -1062,6 +1069,8 @@ private class ProjectImpl(
         }
     )
 
+    override suspend fun createMutes(mutes: List<Mute>) = instance.createMutes(mutes)
+
     override fun getMutesSeq(): Sequence<Mute> = lazyPagingSequence(
         instance = instance,
         getFirstBean = {
@@ -1158,13 +1167,6 @@ private class ProjectImpl(
     override suspend fun createBuildConfiguration(buildConfigurationDescriptionXml: String): BuildConfiguration {
         val bean = instance.service.createBuildType(buildConfigurationDescriptionXml.toApplicationXmlBody())
         return BuildConfigurationImpl(bean, false, instance)
-    }
-
-    override suspend fun createMutes(mutes: List<Mute>) {
-        val bean = MuteListBean().apply {
-            mute = mutes.map(Mute::toMuteBean)
-        }
-        instance.service.createMutes(bean)
     }
 }
 
