@@ -446,26 +446,26 @@ interface Build {
 }
 
 interface Issue {
-    val comment: String // assignment comment
-    val resolveMethod: InvestigationResolveMethod // resolution type
-    val resolutionTime: ZonedDateTime? // resolution time
-    val targetType: InvestigationTargetType // investigation target type
-    val testIds: List<TestId>? // test ids if target type is test
-    val problemIds: List<BuildProblemId>? // build problem ids if target type is build problem
-    val scope: InvestigationScope // scope of investigation/mute
+    val comment: String
+    val resolveMethod: InvestigationResolveMethod
+    val resolutionTime: ZonedDateTime?
+    val targetType: InvestigationTargetType
+    val testIds: List<TestId>?
+    val problemIds: List<BuildProblemId>?
+    val scope: InvestigationScope
+    val reporter: User?
+    val reportedAt: ZonedDateTime?
 }
 
 interface Investigation : Issue {
     val id: InvestigationId
     val assignee: User
-    val reporter: User?
     val state: InvestigationState
 }
 
 interface Mute : Issue {
     val id: InvestigationId
     val assignee: User?
-    val reporter: User?
     val mutedBy: User?
     val tests: List<Test>?
 }
