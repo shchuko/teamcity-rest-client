@@ -918,6 +918,7 @@ internal class MuteBean(
 }
 
 internal class InvestigationListBean {
+    var nextHref: String? = null
     var investigation: List<InvestigationBean> = ArrayList()
 }
 
